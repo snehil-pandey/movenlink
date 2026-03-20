@@ -4,6 +4,7 @@ setlocal
 :: -------------------------------------------------------
 :: Movenlink Installer
 :: Installs movenlink.exe to Program Files and adds to PATH
+:: Registers PowerShell tab completion
 :: Must be run as Administrator
 :: -------------------------------------------------------
 
@@ -67,9 +68,15 @@ powershell -Command ^
   "[System.Environment]::SetEnvironmentVariable('Path', [System.Environment]::GetEnvironmentVariable('Path','Machine'), 'Machine')" ^
   >nul 2>&1
 
+:: Register PowerShell tab completion via the exe itself
+echo Registering PowerShell tab completion...
+"%INSTALL_DIR%\movenlink.exe" __install_completion__
+
 echo.
-echo Done! Open a new terminal and run:
+echo Done! Open a new PowerShell window and run:
 echo   movenlink move    "C:\source\folder" "D:\destination"
 echo   movenlink reverse "D:\destination\folder"
+echo.
+echo Tab completion is active in PowerShell. Press Tab after typing a path.
 echo.
 pause
