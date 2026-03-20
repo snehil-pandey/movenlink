@@ -6,6 +6,7 @@ import json
 
 TRACK_FILE = ".linkinfo.json"
 
+
 # -------------------------
 # Optional Autocomplete
 # -------------------------
@@ -66,8 +67,21 @@ def ensure_exists(path, label="Path"):
 
 
 def write_metadata(path, data):
-    with open(os.path.join(path, TRACK_FILE), "w") as f:
+    track_path = os.path.join(path, TRACK_FILE)
+
+    # remove stale file if exists
+    if os.path.exists(track_path):
+        try:
+            os.remove(track_path)
+        except:
+            pass
+
+    with open(track_path, "w") as f:
         json.dump(data, f)
+
+    # hide only if not testing
+    if not os.environ.get("MOVENLINK_TEST"):
+        subprocess.run(f'attrib +h "{track_path}"', shell=True)
 
 
 def read_metadata(path):
@@ -98,24 +112,29 @@ def move_app(source, destination):
     print(f"  FROM: {source}")
     print(f"  TO:   {final_dest}")
 
+    if os.path.exists(final_dest):
+        print("ERROR: Destination already contains this folder")
+        sys.exit(1)
+
     os.makedirs(destination, exist_ok=True)
 
-    run_cmd(f'robocopy "{source}" "{final_dest}" /E')
+    # copy excluding metadata
+    run_cmd(f'robocopy "{source}" "{final_dest}" /E /XF {TRACK_FILE}')
 
     if not os.path.exists(final_dest):
         print("ERROR: Copy failed")
         sys.exit(1)
 
+    # remove original
     run_cmd(f'rmdir /S /Q "{source}"')
 
     print("Creating symbolic link...")
     run_cmd(f'mklink /D "{source}" "{final_dest}"')
 
+    # write metadata
     write_metadata(final_dest, {
         "original_path": source
     })
-
-    subprocess.run(f'attrib +h "{os.path.join(final_dest, TRACK_FILE)}"', shell=True)
 
     print("Done.\n")
 
@@ -133,7 +152,7 @@ def reverse_app(target_path, final=None):
 
     metadata = read_metadata(target_path)
 
-    if not metadata and not final:
+    if metadata is None and final is None:
         print("ERROR: Not a managed folder. Provide original path manually.")
         sys.exit(1)
 
@@ -143,6 +162,7 @@ def reverse_app(target_path, final=None):
     print(f"  FROM: {target_path}")
     print(f"  TO:   {original_path}")
 
+    # remove symlink
     if os.path.exists(original_path):
         if os.path.islink(original_path):
             run_cmd(f'rmdir "{original_path}"')
@@ -150,8 +170,18 @@ def reverse_app(target_path, final=None):
             print("ERROR: Target exists and is not a symlink")
             sys.exit(1)
 
-    run_cmd(f'robocopy "{target_path}" "{original_path}" /E')
+    # copy back excluding metadata
+    run_cmd(f'robocopy "{target_path}" "{original_path}" /E /XF {TRACK_FILE}')
 
+    # remove metadata first
+    track_path = os.path.join(target_path, TRACK_FILE)
+    if os.path.exists(track_path):
+        try:
+            os.remove(track_path)
+        except:
+            pass
+
+    # remove only this folder
     if os.path.exists(target_path):
         run_cmd(f'rmdir /S /Q "{target_path}"')
 
@@ -178,7 +208,7 @@ Examples:
 Notes:
   - Requires Administrator privileges
   - Uses symbolic links (mklink)
-  - Safe copy-then-delete approach
+  - Metadata is stored per app
 """)
 
 
@@ -186,18 +216,13 @@ def explain_move():
     print("""
 EXPLAIN: move
 
-This command relocates an application folder safely.
+1. Copies files to destination
+2. Verifies copy
+3. Deletes original folder
+4. Creates symbolic link
+5. Stores metadata
 
-Steps performed:
-  1. Copies all files from source to destination
-  2. Verifies the copy exists
-  3. Deletes the original folder
-  4. Creates a symbolic link at original location
-  5. Stores metadata for reversal
-
-Result:
-  Application behaves as if still in original location,
-  but files are physically stored in the new drive.
+Metadata is NOT copied with files.
 """)
 
 
@@ -205,17 +230,12 @@ def explain_reverse():
     print("""
 EXPLAIN: reverse
 
-This command restores a moved application.
+1. Reads metadata
+2. Removes symbolic link
+3. Copies files back (excluding metadata)
+4. Deletes relocated folder
 
-Steps performed:
-  1. Reads metadata to find original path
-  2. Removes symbolic link
-  3. Copies files back to original location
-  4. Deletes relocated folder
-
-Safety:
-  - Only works on managed folders (with metadata)
-  - Prevents accidental deletion of unrelated data
+Only works on managed folders.
 """)
 
 
