@@ -8,10 +8,24 @@ It relocates folders and replaces them with symbolic links, so apps continue wor
 
 ## Why?
 
-Windows applications often break when moved manually.  
-movenlink solves this by using symbolic links to preserve original paths.
+When your system drive fills up, the obvious fix is moving apps to another drive.
+But most Windows applications hardcode their install path deep in the registry,
+config files, and shortcuts — move the folder manually and they break instantly.
 
----
+The usual options are:
+- Reinstall the app directly to the new drive — tedious, and you lose settings
+- Use Windows' "Move" feature in Apps & Features — only works for some Store apps
+- Symlink it yourself — works perfectly, but requires knowing the right commands
+
+movenlink automates that last option. It moves your folder to wherever you want,
+then leaves a symbolic link at the original path so the app never knows it moved.
+No reinstalling. No broken shortcuts. No registry edits.
+
+Useful for:
+- Steam libraries and game folders eating up your C: drive
+- Large app installs like Adobe, DaVinci Resolve, or IDEs
+- Moving user data folders like Downloads or Documents to a bigger drive
+- Any folder an app expects to find at a fixed path
 
 ## Features
 
