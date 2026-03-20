@@ -15,6 +15,12 @@ if %errorlevel% neq 0 (
 
 set INSTALL_DIR=%ProgramFiles%\Movenlink
 
+:: Remove tab completion from PowerShell profile first (while exe still exists)
+if exist "%INSTALL_DIR%\movenlink.exe" (
+    echo Removing PowerShell tab completion...
+    "%INSTALL_DIR%\movenlink.exe" __uninstall_completion__
+)
+
 :: Remove exe and folder
 if exist "%INSTALL_DIR%" (
     rmdir /S /Q "%INSTALL_DIR%"
@@ -27,7 +33,6 @@ if exist "%INSTALL_DIR%" (
 for /f "tokens=*" %%i in ('powershell -Command ^
     "[System.Environment]::GetEnvironmentVariable('Path','Machine')"') do set CURRENT_PATH=%%i
 
-:: Strip the install dir from PATH
 set NEW_PATH=%CURRENT_PATH:%INSTALL_DIR%;=%
 set NEW_PATH=%NEW_PATH:;%INSTALL_DIR%=%
 
