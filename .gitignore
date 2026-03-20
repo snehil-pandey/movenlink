@@ -4,3 +4,5 @@ __pycache__/
 test_env/
 .linkinfo.json
 .vscode/
+dist/
+build/
