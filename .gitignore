@@ -1,5 +1,6 @@
-/test_env
-/venv
-/.vscode
-/__pycache__
+venv/
+__pycache__/
 *.pyc
+test_env/
+.linkinfo.json
+.vscode/
