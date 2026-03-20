@@ -1,0 +1,1 @@
+pyreadline3; platform_system == "Windows"
