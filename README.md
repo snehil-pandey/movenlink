@@ -37,6 +37,18 @@ Useful for:
 - Zero runtime dependencies — single exe, no installer bloat
 - Built for low-end systems with limited SSD space
 
+## How movenlink compares
+
+| Feature | movenlink | Steam Mover | Manual mklink |
+|---|---|---|---|
+| Rollback on failure | ✅ | ❌ | ❌ |
+| Reverse operation | ✅ | ❌ | Manual |
+| Metadata tracking | ✅ | ❌ | ❌ |
+| Any folder (not just Steam) | ✅ | ❌ | ✅ |
+| Single exe, no dependencies | ✅ | ❌ | ✅ |
+| Auto admin elevation | ✅ | ❌ | ❌ |
+| Test suite | ✅ | ❌ | ❌ |
+
 ---
 
 ## How It Works
