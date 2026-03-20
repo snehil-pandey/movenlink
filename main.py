@@ -15,20 +15,6 @@ class MovenlinkError(Exception):
 
 
 # -------------------------
-# Autocomplete
-# -------------------------
-try:
-    import readline
-except ImportError:
-    readline = None
-
-
-def enable_autocomplete():
-    if readline:
-        readline.parse_and_bind("tab: complete")
-
-
-# -------------------------
 # Utils
 # -------------------------
 def is_admin():
@@ -45,7 +31,7 @@ def run_cmd(cmd):
 
 
 def ensure_exists(path, label="Path"):
-    if not os.path.exists(path):
+    if not (os.path.exists(path) or os.path.islink(path)):
         raise MovenlinkError(f"{label} does not exist: {path}")
 
 
@@ -53,10 +39,7 @@ def write_metadata(path, data):
     track_path = os.path.join(path, TRACK_FILE)
 
     if os.path.exists(track_path):
-        try:
-            os.remove(track_path)
-        except:
-            pass
+        os.remove(track_path)
 
     with open(track_path, "w") as f:
         json.dump(data, f)
@@ -93,14 +76,19 @@ def move_app(source, destination):
 
     os.makedirs(destination, exist_ok=True)
 
+    # Copy
     run_cmd(f'robocopy "{source}" "{final_dest}" /E /XF {TRACK_FILE}')
 
     if not os.path.exists(final_dest):
         raise MovenlinkError("Copy failed")
 
+    # Delete original folder
     run_cmd(f'rmdir /S /Q "{source}"')
+
+    # Create symlink EXACTLY at original path
     run_cmd(f'mklink /D "{source}" "{final_dest}"')
 
+    # Save metadata in destination
     write_metadata(final_dest, {"original_path": source})
 
 
@@ -118,21 +106,22 @@ def reverse_app(target_path, final=None):
 
     original_path = final if final else metadata["original_path"]
 
+    # Remove symlink if exists
     if os.path.exists(original_path):
         if os.path.islink(original_path):
             run_cmd(f'rmdir "{original_path}"')
         else:
             raise MovenlinkError("Target exists and is not a symlink")
 
+    # Copy back
     run_cmd(f'robocopy "{target_path}" "{original_path}" /E /XF {TRACK_FILE}')
 
+    # Remove metadata
     track_path = os.path.join(target_path, TRACK_FILE)
     if os.path.exists(track_path):
-        try:
-            os.remove(track_path)
-        except:
-            pass
+        os.remove(track_path)
 
+    # Delete moved folder
     if os.path.exists(target_path):
         run_cmd(f'rmdir /S /Q "{target_path}"')
 
@@ -141,11 +130,9 @@ def reverse_app(target_path, final=None):
 # CLI
 # -------------------------
 def main():
-    enable_autocomplete()
-
     try:
         if len(sys.argv) < 2:
-            print("Use: move | reverse | help")
+            print("Use: move | reverse")
             return
 
         cmd = sys.argv[1]
