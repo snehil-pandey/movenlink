@@ -1,41 +1,63 @@
 # movenlink
 
-A lightweight CLI tool to move applications across drives on Windows without breaking them.
+Move apps across drives on Windows without breaking them.
 
-It relocates folders and replaces them with symbolic links, so apps continue working as if nothing changed.
+movenlink relocates folders to a new drive and leaves a symbolic link at the original path — so apps, games, and tools continue working exactly as before, with no reinstalling, no broken shortcuts, and no registry edits.
 
 ---
 
 ## Why?
 
-When your system drive fills up, the obvious fix is moving apps to another drive.
-But most Windows applications hardcode their install path deep in the registry,
-config files, and shortcuts — move the folder manually and they break instantly.
+When your system drive fills up, the obvious fix is moving things to another drive. But Windows applications hardcode their install paths deep in the registry, config files, and shortcuts. Move the folder manually and they break instantly.
 
-The usual options are:
-- Reinstall the app directly to the new drive — tedious, and you lose settings
-- Use Windows' "Move" feature in Apps & Features — only works for some Store apps
-- Symlink it yourself — works perfectly, but requires knowing the right commands
+The usual options are frustrating:
+- **Reinstall to the new drive** — tedious, and you lose all your settings
+- **Apps & Features → Move** — only works for a handful of Store apps
+- **Symlink it yourself** — works perfectly, but the manual steps are error-prone and easy to get wrong
 
-movenlink automates that last option. It moves your folder to wherever you want,
-then leaves a symbolic link at the original path so the app never knows it moved.
-No reinstalling. No broken shortcuts. No registry edits.
+movenlink automates the symlink approach safely. It copies your folder to the destination, verifies the copy, removes the original, and creates a symbolic link in its place — so the app never knows it moved.
 
 Useful for:
-- Steam libraries and game folders eating up your C: drive
-- Large app installs like Adobe, DaVinci Resolve, or IDEs
-- Moving user data folders like Downloads or Documents to a bigger drive
-- Any folder an app expects to find at a fixed path
+- DaVinci Resolve, Adobe, or other large creative tools filling up your C: drive
+- Local AI models (Ollama, LM Studio) that default to C: and grow fast
+- Steam libraries and game folders
+- IDEs, SDKs, and dev tools
+- Any folder an app expects to always find at the same path
+
+---
 
 ## Features
 
-- Safe folder relocation (copy → verify → delete → link)
-- Reverse operation (restore original location)
-- Metadata tracking per folder
-- Auto admin elevation via manifest
-- PowerShell tab completion for folder paths
-- Zero runtime dependencies
-- Designed for low-end systems
+- Safe move — copy → verify → delete → link, in that order
+- Rollback — if anything fails mid-operation, the original is automatically restored
+- Reverse — restore a folder to its original location at any time
+- Metadata tracking — each moved folder remembers where it came from
+- Auto admin elevation — no need to manually run as administrator
+- PowerShell tab completion — registered automatically on install
+- Zero runtime dependencies — single exe, no installer bloat
+- Built for low-end systems with limited SSD space
+
+---
+
+## How It Works
+
+**move:**
+1. Copy source folder to destination using robocopy
+2. Verify the copy succeeded
+3. Write `.linkinfo.json` to destination (stores the original path)
+4. Delete the original folder
+5. Create a symbolic link at the original path pointing to the destination
+6. If the symlink creation fails → automatically roll back and restore the original folder
+
+**reverse:**
+1. Read `.linkinfo.json` from the target folder to find the original path
+2. Remove the symbolic link at the original path (if present)
+3. Copy files back to the original path using robocopy
+4. Verify the copy succeeded
+5. Delete the metadata file
+6. Delete the moved folder
+
+Files are **never deleted before a successful copy is confirmed** — in both directions.
 
 ---
 
@@ -44,9 +66,9 @@ Useful for:
 ```
 movenlink/
 ├── main.py                 # Core logic and CLI entry point
-├── movenlink.manifest      # Admin elevation manifest (baked into exe)
+├── movenlink.manifest      # Admin elevation manifest (baked into exe at build time)
 ├── build.bat               # Compiles main.py into movenlink.exe
-├── install.bat             # Installs exe to Program Files, adds to PATH, registers tab completion
+├── install.bat             # Installs exe, adds to PATH, registers tab completion
 ├── uninstall.bat           # Removes exe, cleans PATH, removes tab completion
 ├── test_movenlink.py       # Test suite
 ├── requirements.txt        # Runtime dependencies (none)
@@ -84,20 +106,19 @@ pip install -r requirements-build.txt
 build.bat
 ```
 
-This compiles `main.py` into `dist\movenlink.exe` with the admin manifest baked in.  
-Windows will automatically prompt for administrator access every time it runs.
+Compiles `main.py` into `dist\movenlink.exe` with the admin manifest baked in. Windows will automatically prompt for administrator access every time it runs — no manual "run as administrator" needed.
 
 ### 4. Install
 
-Right-click `install.bat` → **Run as administrator**.
+Right-click `install.bat` → **Run as administrator**
 
 This will:
 - Copy `movenlink.exe` to `C:\Program Files\Movenlink\`
-- Add it to the system PATH permanently
+- Add it to the system PATH permanently via registry
 - Register PowerShell tab completion in your `$PROFILE`
-- Broadcast the PATH change — no reboot needed
+- Broadcast the PATH change so new terminals pick it up immediately — no reboot needed
 
-Verify the install by opening a new terminal:
+Verify:
 
 ```bash
 movenlink --help
@@ -105,9 +126,9 @@ movenlink --help
 
 ### Uninstall
 
-Right-click `uninstall.bat` → **Run as administrator**.
+Right-click `uninstall.bat` → **Run as administrator**
 
-This removes the exe, cleans it from PATH, and removes the tab completion from your PowerShell profile.
+Removes the exe, cleans PATH, and removes the tab completion block from your PowerShell profile.
 
 ---
 
@@ -119,18 +140,16 @@ This removes the exe, cleans it from PATH, and removes the tab completion from y
 movenlink move "<source>" "<destination>"
 ```
 
-Moves the folder to the destination and leaves a symbolic link at the original path so everything keeps working.
-
-**Example:**
+**Example — move DaVinci Resolve to D: drive:**
 
 ```bash
-movenlink move "C:\Users\me\Games\SteamLibrary" "D:\Games"
+movenlink move "C:\Program Files\DaVinci Resolve" "D:\Apps"
 ```
 
 After this:
-- Files live at `D:\Games\SteamLibrary`
-- `C:\Users\me\Games\SteamLibrary` is a symlink pointing there
-- Apps using the original path continue to work normally
+- Files live at `D:\Apps\DaVinci Resolve`
+- `C:\Program Files\DaVinci Resolve` is a symlink pointing there
+- DaVinci Resolve launches and works exactly as before
 
 ### Reverse a move
 
@@ -138,17 +157,17 @@ After this:
 movenlink reverse "<target>"
 ```
 
-Restores the folder back to its original location and removes the symlink.
-
 **Example:**
 
 ```bash
-movenlink reverse "D:\Games\SteamLibrary"
+movenlink reverse "D:\Apps\DaVinci Resolve"
 ```
 
-### Reverse to a custom path
+Reads the saved metadata, copies everything back to the original path, removes the symlink, and deletes the moved folder.
 
-If the original path is lost or you want to restore somewhere else:
+### Reverse to a different path
+
+If the original path no longer exists or you want to restore somewhere else:
 
 ```bash
 movenlink reverse "<target>" "<restore_path>"
@@ -157,52 +176,29 @@ movenlink reverse "<target>" "<restore_path>"
 **Example:**
 
 ```bash
-movenlink reverse "D:\Games\SteamLibrary" "C:\Users\me\Games\SteamLibrary"
+movenlink reverse "D:\Apps\DaVinci Resolve" "C:\Program Files\DaVinci Resolve"
 ```
 
 ### Help
 
 ```bash
 movenlink --help
-movenlink help
 ```
 
 ---
 
 ## Tab Completion
 
-Tab completion works in **PowerShell** and is registered automatically during install.
+Registered automatically during install. Works in PowerShell.
 
 ```powershell
-movenlink <Tab>               # completes → move, reverse, help
-movenlink move C:\Us<Tab>     # completes → C:\Users\
-movenlink move C:\Users\<Tab> # lists all subfolders
-movenlink move "D:\My Ga<Tab> # handles paths with spaces, wraps in quotes automatically
+movenlink <Tab>                # → move, reverse, help
+movenlink move C:\Us<Tab>      # → C:\Users\
+movenlink move C:\Users\<Tab>  # → lists all subfolders
+movenlink move "D:\My Ga<Tab>  # → handles spaces, wraps result in quotes
 ```
 
-> **Note:** In `cmd.exe`, folder tab completion works out of the box without any setup — just press Tab on any path argument.
-
----
-
-## How It Works
-
-```
-move:
-  1. Copy source folder to destination using robocopy
-  2. Verify copy succeeded
-  3. Write .linkinfo.json metadata to destination (stores original path)
-  4. Delete original folder
-  5. Create symbolic link at original path pointing to destination
-  6. If symlink creation fails → automatically roll back (restore original folder)
-
-reverse:
-  1. Read .linkinfo.json from target to get original path
-  2. Remove symbolic link at original path (if present)
-  3. Copy files back to original path using robocopy
-  4. Verify copy succeeded
-  5. Delete metadata file
-  6. Delete moved folder
-```
+In `cmd.exe`, folder tab completion works out of the box on any argument without any setup.
 
 ---
 
@@ -211,116 +207,95 @@ reverse:
 | Situation | Behavior |
 |---|---|
 | Source is already a symlink | Fails — prevents double move |
-| Destination already has the folder | Fails with conflict error |
-| Symlink creation fails after delete | Auto rollback — files restored to original path |
-| Copy back fails during reverse | Aborts — files remain safe at moved location |
-| Metadata file is corrupted | Clean error instead of crash |
-| Broken symlink passed as source | Rejected immediately with clear error |
-| Not enough arguments | Prints usage and exits cleanly |
+| Destination already has the folder | Fails with a conflict error |
+| Symlink creation fails after delete | Auto rollback — original folder restored |
+| Copy back fails during reverse | Aborts — files stay safe at moved location |
+| Metadata file is corrupted | Clean error — no crash |
+| Broken symlink passed as source | Rejected immediately with a clear message |
+| Missing arguments | Prints usage and exits cleanly |
 
 ---
 
 ## Testing
 
-Tests live in `test_movenlink.py`. Run them from inside the venv.
-
-### Run all tests
+Tests are in `test_movenlink.py` and run inside the venv.
 
 ```bash
+# Run all tests
 python test_movenlink.py
-```
 
-### List all available tests
-
-```bash
+# List all tests with descriptions
 python test_movenlink.py --list
-```
 
-### Run a specific test by index
+# Run a single test by index
+python test_movenlink.py --test 4
 
-```bash
-python test_movenlink.py --test 2
-```
-
-### Show timing per test
-
-```bash
+# Show time taken per test
 python test_movenlink.py --include-time
 ```
 
-### Combine flags
+### Adding a test
 
-```bash
-python test_movenlink.py --test 2 --include-time
-```
-
-### Adding new tests
-
-1. Write a test function in `test_movenlink.py`:
+1. Write the function:
 
 ```python
 def test_your_case():
-    create_files(SRC)           # set up files
+    create_files(SRC)           # create test files
     move_app(SRC, DEST)         # run the operation
-    return os.path.exists(...)  # return True = PASS, False = FAIL
+    return os.path.exists(...)  # True = PASS, False = FAIL
 ```
 
-2. Register it in the `TESTS` list:
+2. Register it:
 
 ```python
 TESTS = [
     ...
-    ("Your Test Name", test_your_case, "One line description of what it checks"),
+    ("Your Test Name", test_your_case, "What this test checks"),
 ]
 ```
 
-It will automatically appear in `--list` and run with all other tests.
+It will appear in `--list` and run automatically with all other tests.
 
-### Current test coverage
+### Test coverage
 
 | # | Test | What it checks |
 |---|---|---|
-| 0 | Move+Reverse | Move a folder and restore it back cleanly |
-| 1 | Manual Reverse | Restore using a manually written metadata file |
-| 2 | Invalid Reverse | Folder without metadata should fail safely |
+| 0 | Move+Reverse | Full move and restore cycle |
+| 1 | Manual Reverse | Restore using a hand-written metadata file |
+| 2 | Invalid Reverse | Folder with no metadata should fail cleanly |
 | 3 | Conflict | Fail if destination already has the folder |
-| 4 | Link Write | Files written through symlink appear in real folder |
-| 5 | Link Delete | Files deleted through symlink disappear from real folder |
-| 6 | Link Rename | Files renamed through symlink update in real folder |
-| 7 | Nested Folder | Subfolders created through symlink work correctly |
+| 4 | Link Write | Files written via symlink appear in real folder |
+| 5 | Link Delete | Files deleted via symlink disappear from real folder |
+| 6 | Link Rename | Files renamed via symlink update in real folder |
+| 7 | Nested Folder | Subfolders created via symlink work correctly |
 | 8 | Double Move | Moving an already-symlinked folder must fail |
 | 9 | Empty Folder | Move and reverse a folder with no files |
 | 10 | Corrupt Metadata | Malformed metadata raises a clean error |
 | 11 | Reverse No Symlink | Restore works even if symlink was already deleted |
 | 12 | Same Location | Moving into own parent directory must fail |
-| 13 | Metadata Written | Metadata file exists with correct path after move |
-| 14 | Metadata Cleaned | Metadata and destination folder removed after reverse |
+| 13 | Metadata Written | Metadata exists with correct path after move |
+| 14 | Metadata Cleaned | Metadata and destination removed after reverse |
 
 ---
 
 ## Dependencies
 
-**Runtime:** none — all modules used are Python standard library.
+No runtime dependencies. Everything used — `os`, `sys`, `subprocess`, `ctypes`, `json` — is Python standard library.
 
-**Build only:**
+Build only:
 
 ```bash
-pip install -r requirements-build.txt
-```
-
-```
-# requirements-build.txt
-pyinstaller
+pip install -r requirements-build.txt  # pyinstaller
 ```
 
 ---
 
 ## Notes
 
-- movenlink is **Windows only** — it relies on `mklink`, `robocopy`, and `rmdir`
-- Symlink creation requires **Administrator** privileges — handled automatically via the manifest
-- Do not manually delete `.linkinfo.json` from the destination folder — `reverse` needs it to know where to restore
-- Files are never deleted before a successful copy is confirmed — operations are safe to interrupt
+- **Windows only** — relies on `mklink`, `robocopy`, and `rmdir`
+- **Do not delete `.linkinfo.json`** from the destination folder manually — `reverse` needs it to know where to restore
+- The metadata file is hidden automatically after a move (unless running in test mode)
+- Operations are safe to fail — files are never in an unrecoverable state
 
 ---
 
