@@ -62,7 +62,6 @@ def test_move_reverse():
 
     moved = get_dest_path()
 
-    # FIX: check move result before proceeding to reverse
     if not verify(moved, data):
         return False
 
@@ -104,7 +103,6 @@ def test_conflict():
 
 
 def test_link_write():
-    # FIX: create files before moving
     create_files(SRC)
     move_app(SRC, DEST)
 
@@ -151,7 +149,6 @@ def test_link_rename():
 
 
 def test_nested_structure():
-    # FIX: create files before moving
     create_files(SRC)
     move_app(SRC, DEST)
 
@@ -183,18 +180,130 @@ def test_nested_structure():
     return os.path.exists(real_file) and open(real_file).read() == content
 
 
+def test_double_move():
+    # Moving an already symlinked (already moved) folder should raise MovenlinkError
+    create_files(SRC)
+    move_app(SRC, DEST)
+
+    second_dest = os.path.join(BASE, "destination2")
+
+    try:
+        move_app(SRC, second_dest)
+        return False
+    except MovenlinkError:
+        return True
+
+
+def test_empty_folder_move():
+    # Moving a folder with no files should work fine and be reversible
+    os.makedirs(SRC, exist_ok=True)  # empty, no files
+
+    move_app(SRC, DEST)
+
+    moved = get_dest_path()
+    if not os.path.exists(moved):
+        return False
+    if not os.path.islink(SRC):
+        return False
+
+    reverse_app(moved)
+
+    return os.path.exists(SRC) and not os.path.islink(SRC)
+
+
+def test_corrupt_metadata():
+    # Malformed .linkinfo.json should raise MovenlinkError, not crash with JSONDecodeError
+    os.makedirs(MANUAL, exist_ok=True)
+
+    with open(os.path.join(MANUAL, ".linkinfo.json"), "w") as f:
+        f.write("{ this is not valid json }")
+
+    try:
+        reverse_app(MANUAL)
+        return False
+    except MovenlinkError:
+        return True
+
+
+def test_reverse_no_symlink():
+    # If the symlink at original path is already gone, reverse should still
+    # copy files back to original path cleanly
+    data = create_files(SRC)
+    move_app(SRC, DEST)
+
+    moved = get_dest_path()
+
+    # Manually remove symlink, simulating it being deleted externally
+    if os.path.islink(SRC):
+        os.rmdir(SRC)
+
+    # reverse should still work — no symlink to remove, just copy back
+    reverse_app(moved)
+
+    return verify(SRC, data)
+
+
+def test_move_same_location():
+    # Moving a folder into its own parent (same effective location) should fail
+    create_files(SRC)
+    src_abs = os.path.abspath(SRC)
+    src_parent = os.path.dirname(src_abs)
+
+    try:
+        move_app(src_abs, src_parent)
+        return False
+    except MovenlinkError:
+        return True
+
+
+def test_metadata_written():
+    # After move, .linkinfo.json must exist in destination with correct original_path
+    create_files(SRC)
+    move_app(SRC, DEST)
+
+    moved = get_dest_path()
+    meta_path = os.path.join(moved, ".linkinfo.json")
+
+    if not os.path.exists(meta_path):
+        return False
+
+    with open(meta_path) as f:
+        data = json.load(f)
+
+    return data.get("original_path") == os.path.abspath(SRC)
+
+
+def test_metadata_removed_after_reverse():
+    # After reverse, .linkinfo.json must be gone from the destination
+    create_files(SRC)
+    move_app(SRC, DEST)
+
+    moved = get_dest_path()
+    reverse_app(moved)
+
+    # destination folder should be fully gone
+    return not os.path.exists(moved)
+
+
 # -------------------------
 # Test Registry
 # -------------------------
 TESTS = [
-    ("Move+Reverse", test_move_reverse, "Move a folder and bring it back like nothing changed"),
-    ("Manual Reverse", test_manual_reverse, "Use saved info file to restore folder to original place"),
-    ("Invalid Reverse", test_invalid_reverse, "Try restoring wrong folder and expect it to fail safely"),
-    ("Conflict", test_conflict, "Stop if same folder already exists in destination"),
-    ("Link Write", test_link_write, "Create file in shortcut folder and check it appears in real folder"),
-    ("Link Delete", test_link_delete, "Delete file from shortcut and check it disappears in real folder"),
-    ("Link Rename", test_link_rename, "Rename file in shortcut and check it updates in real folder"),
-    ("Nested Folder", test_nested_structure, "Create folder inside shortcut and verify it works properly"),
+    ("Move+Reverse",          test_move_reverse,             "Move a folder and bring it back like nothing changed"),
+    ("Manual Reverse",        test_manual_reverse,           "Use saved info file to restore folder to original place"),
+    ("Invalid Reverse",       test_invalid_reverse,          "Try restoring wrong folder and expect it to fail safely"),
+    ("Conflict",              test_conflict,                 "Stop if same folder already exists in destination"),
+    ("Link Write",            test_link_write,               "Create file in shortcut folder and check it appears in real folder"),
+    ("Link Delete",           test_link_delete,              "Delete file from shortcut and check it disappears in real folder"),
+    ("Link Rename",           test_link_rename,              "Rename file in shortcut and check it updates in real folder"),
+    ("Nested Folder",         test_nested_structure,         "Create folder inside shortcut and verify it works properly"),
+    ("Double Move",           test_double_move,              "Moving an already symlinked folder should fail with an error"),
+    ("Empty Folder",          test_empty_folder_move,        "Move and reverse a folder that has no files inside"),
+    ("Corrupt Metadata",      test_corrupt_metadata,         "Malformed metadata file should raise a clean error, not crash"),
+    ("Reverse No Symlink",    test_reverse_no_symlink,       "Restore folder even when symlink at original path is already gone"),
+    ("Same Location",         test_move_same_location,       "Moving folder into its own parent directory should fail"),
+    ("Metadata Written",      test_metadata_written,         "Check metadata file is created with correct path after move"),
+    ("Metadata Cleaned",      test_metadata_removed_after_reverse, "Check metadata and destination folder are gone after reverse"),
 ]
 
 
@@ -225,10 +334,8 @@ def run(selected=None, timing=False):
             ok = False
 
         t = time.time() - t0
-        # FIX: always store t so --detailed can show it when --include-time is set
         results.append((name, ok, t, desc))
 
-        # FIX: use try/finally to ensure cleanup always runs
         try:
             shutil.rmtree(BASE)
             os.makedirs(BASE)
@@ -241,22 +348,20 @@ def run(selected=None, timing=False):
     # -------------------------
     # Output
     # -------------------------
-
-    # Table — always shown, time column added with --include-time
     if timing:
-        print("\n+----------------------+--------+-----------+")
-        print("| Test                 | Result | Time      |")
-        print("+----------------------+--------+-----------+")
+        print("\n+------------------------+--------+-----------+")
+        print("| Test                   | Result | Time      |")
+        print("+------------------------+--------+-----------+")
         for name, ok, t, _ in results:
-            print(f"| {name:<20} | {'PASS' if ok else 'FAIL':<6} | {t:.4f}s   |")
-        print("+----------------------+--------+-----------+")
+            print(f"| {name:<22} | {'PASS' if ok else 'FAIL':<6} | {t:.4f}s   |")
+        print("+------------------------+--------+-----------+")
     else:
-        print("\n+----------------------+--------+")
-        print("| Test                 | Result |")
-        print("+----------------------+--------+")
+        print("\n+------------------------+--------+")
+        print("| Test                   | Result |")
+        print("+------------------------+--------+")
         for name, ok, t, _ in results:
-            print(f"| {name:<20} | {'PASS' if ok else 'FAIL':<6} |")
-        print("+----------------------+--------+")
+            print(f"| {name:<22} | {'PASS' if ok else 'FAIL':<6} |")
+        print("+------------------------+--------+")
 
     print(f"\n{passed}/{total} passed")
 
@@ -278,15 +383,13 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # --list: print all tests and exit
     if args.list:
         print("\nAvailable tests:\n")
         for i, (name, _, desc) in enumerate(TESTS):
-            print(f"  [{i}] {name}: {desc}")
+            print(f"  [{i:>2}] {name:<22}  {desc}")
         print()
         exit(0)
 
-    # --test: validate index
     if args.test is not None:
         if args.test < 0 or args.test >= len(TESTS):
             print(f"Invalid test index. Use --list to see available tests (0 to {len(TESTS) - 1}).")
