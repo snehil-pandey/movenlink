@@ -1,4 +1,5 @@
 import os
+import sys
 import shutil
 import time
 import argparse
@@ -200,7 +201,7 @@ TESTS = [
 # -------------------------
 # Runner
 # -------------------------
-def run(selected=None, detailed=False, timing=False):
+def run(selected=None, timing=False):
     os.environ["MOVENLINK_TEST"] = "1"
 
     if os.path.exists(BASE):
@@ -214,6 +215,9 @@ def run(selected=None, detailed=False, timing=False):
     for name, func, desc in selected_tests:
         t0 = time.time()
 
+        print(f"\n{'='*60}")
+        print(f"  Running: {name}")
+        print(f"{'='*60}")
         try:
             ok = func()
         except Exception as e:
@@ -221,7 +225,8 @@ def run(selected=None, detailed=False, timing=False):
             ok = False
 
         t = time.time() - t0
-        results.append((name, ok, t if timing else None, desc))
+        # FIX: always store t so --detailed can show it when --include-time is set
+        results.append((name, ok, t, desc))
 
         # FIX: use try/finally to ensure cleanup always runs
         try:
@@ -236,32 +241,25 @@ def run(selected=None, detailed=False, timing=False):
     # -------------------------
     # Output
     # -------------------------
-    if detailed:
+
+    # Table — always shown, time column added with --include-time
+    if timing:
         print("\n+----------------------+--------+-----------+")
         print("| Test                 | Result | Time      |")
         print("+----------------------+--------+-----------+")
-
         for name, ok, t, _ in results:
-            time_str = f"{t:.4f}s" if timing and t else "-"
-            print(f"| {name:<20} | {'PASS' if ok else 'FAIL':<6} | {time_str:<9} |")
-
+            print(f"| {name:<20} | {'PASS' if ok else 'FAIL':<6} | {t:.4f}s   |")
         print("+----------------------+--------+-----------+")
-
-        print("\nDetails:")
-        for name, _, _, desc in results:
-            print(f"{name}: {desc}")
-
     else:
-        print("\nSummary:")
+        print("\n+----------------------+--------+")
+        print("| Test                 | Result |")
+        print("+----------------------+--------+")
         for name, ok, t, _ in results:
-            line = f"{name}: {'PASS' if ok else 'FAIL'}"
-            if timing and t:
-                line += f" ({t:.4f}s)"
-            print(line)
+            print(f"| {name:<20} | {'PASS' if ok else 'FAIL':<6} |")
+        print("+----------------------+--------+")
 
     print(f"\n{passed}/{total} passed")
 
-    # FIX: wrap final cleanup in try/finally
     try:
         shutil.rmtree(BASE)
     except Exception as e:
@@ -272,21 +270,29 @@ def run(selected=None, detailed=False, timing=False):
 # CLI
 # -------------------------
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Movenlink Test Suite")
 
-    parser.add_argument("--detailed", action="store_true")
-    parser.add_argument("--include-time", action="store_true")
-    parser.add_argument("--test", type=int)
+    parser.add_argument("--include-time", action="store_true", help="Show how long each test took")
+    parser.add_argument("--test",         type=int,            help="Run a single test by index (see --list)")
+    parser.add_argument("--list",         action="store_true", help="List all available tests and exit")
 
     args = parser.parse_args()
 
+    # --list: print all tests and exit
+    if args.list:
+        print("\nAvailable tests:\n")
+        for i, (name, _, desc) in enumerate(TESTS):
+            print(f"  [{i}] {name}: {desc}")
+        print()
+        exit(0)
+
+    # --test: validate index
     if args.test is not None:
         if args.test < 0 or args.test >= len(TESTS):
-            print("Invalid test index")
+            print(f"Invalid test index. Use --list to see available tests (0 to {len(TESTS) - 1}).")
             exit(1)
 
     run(
         selected=args.test,
-        detailed=args.detailed,
-        timing=args.include_time
+        timing=args.include_time,
     )
