@@ -1,223 +1,158 @@
 import os
 import shutil
+import time
+import argparse
 import random
 import string
-import json
-import importlib.util
 
-# -------------------------
-# Dynamically load main.py
-# -------------------------
-spec = importlib.util.spec_from_file_location("movenlink", "main.py")
-movenlink = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(movenlink)
+from main import move_app, reverse_app, MovenlinkError
 
-move_app = movenlink.move_app
-reverse_app = movenlink.reverse_app
-TRACK_FILE = movenlink.TRACK_FILE
+BASE = "test_env"
+SRC = os.path.join(BASE, "original")
+DEST = os.path.join(BASE, "destination")
+MANUAL = os.path.join(BASE, "manual")
 
-
-# -------------------------
-# Config
-# -------------------------
-BASE_DIR = os.path.abspath("test_env")
-SRC_DIR = os.path.join(BASE_DIR, "original")
-DEST_DIR = os.path.join(BASE_DIR, "destination")
-MANUAL_DIR = os.path.join(BASE_DIR, "manual_dest")
-
-TEST_RESULTS = []
+results = []
 
 
 # -------------------------
 # Helpers
 # -------------------------
-def rand_text(n=20):
-    return ''.join(random.choices(string.ascii_letters, k=n))
+def rand():
+    return ''.join(random.choices(string.ascii_letters, k=10))
 
 
-def create_files(folder, count=5):
-    os.makedirs(folder, exist_ok=True)
-    files = []
-
-    for i in range(count):
-        path = os.path.join(folder, f"file_{i}.txt")
-        content = rand_text()
-
-        with open(path, "w") as f:
-            f.write(content)
-
-        files.append((path, content))
-
-    return files
+def create_files(path):
+    os.makedirs(path, exist_ok=True)
+    data = {}
+    for i in range(5):
+        f = os.path.join(path, f"f{i}.txt")
+        content = rand()
+        with open(f, "w") as file:
+            file.write(content)
+        data[f] = content
+    return data
 
 
-def verify_files(folder, files):
-    for original_path, content in files:
-        filename = os.path.basename(original_path)
-        new_path = os.path.join(folder, filename)
-
-        if not os.path.exists(new_path):
+def verify(path, data):
+    for f, content in data.items():
+        name = os.path.basename(f)
+        new = os.path.join(path, name)
+        if not os.path.exists(new):
             return False
-
-        with open(new_path) as f:
-            if f.read() != content:
-                return False
-
+        if open(new).read() != content:
+            return False
     return True
 
 
-def record(name, passed):
-    TEST_RESULTS.append((name, passed))
-    print(f"[{'PASS' if passed else 'FAIL'}] {name}")
+def record(name, ok, t=None, detailed=False):
+    results.append((name, ok, t))
+    if detailed:
+        msg = f"{name}: {'PASS' if ok else 'FAIL'}"
+        if t is not None:
+            msg += f" ({t:.4f}s)"
+        print(msg)
 
 
 # -------------------------
-# Setup / Cleanup
+# Tests
 # -------------------------
-def setup():
-    if os.path.exists(BASE_DIR):
-        shutil.rmtree(BASE_DIR)
-    os.makedirs(BASE_DIR)
+def test_move_reverse(detailed, timing):
+    t0 = time.time()
+
+    data = create_files(SRC)
+    move_app(SRC, DEST)
+
+    moved = os.path.join(DEST, "original")
+    ok = verify(moved, data)
+
+    reverse_app(moved)
+    ok = ok and verify(SRC, data)
+
+    t1 = time.time()
+    record("Move+Reverse", ok, t1 - t0 if timing else None, detailed)
 
 
-def cleanup():
-    if os.path.exists(BASE_DIR):
-        shutil.rmtree(BASE_DIR)
+def test_manual_reverse(detailed, timing):
+    t0 = time.time()
+
+    data = create_files(SRC)
+    shutil.copytree(SRC, MANUAL)
+    shutil.rmtree(SRC)
+
+    with open(os.path.join(MANUAL, ".linkinfo.json"), "w") as f:
+        f.write(f'{{"original_path": "{SRC}"}}')
+
+    reverse_app(MANUAL)
+    ok = verify(SRC, data)
+
+    t1 = time.time()
+    record("Manual Reverse", ok, t1 - t0 if timing else None, detailed)
 
 
-# -------------------------
-# TEST 1: Move + Reverse
-# -------------------------
-def test_move_and_reverse():
+def test_invalid_reverse(detailed, timing):
+    t0 = time.time()
+
+    os.makedirs(MANUAL, exist_ok=True)
+
     try:
-        files = create_files(SRC_DIR)
+        reverse_app(MANUAL)
+        ok = False
+    except MovenlinkError:
+        ok = True
 
-        move_app(SRC_DIR, DEST_DIR)
-
-        moved_path = os.path.join(DEST_DIR, "original")
-
-        cond1 = os.path.exists(moved_path)
-        cond2 = verify_files(moved_path, files)
-
-        reverse_app(moved_path)
-
-        cond3 = os.path.exists(SRC_DIR)
-        cond4 = verify_files(SRC_DIR, files)
-
-        record("Move and Reverse", cond1 and cond2 and cond3 and cond4)
-
-    except Exception as e:
-        print(e)
-        record("Move and Reverse", False)
+    t1 = time.time()
+    record("Invalid Reverse", ok, t1 - t0 if timing else None, detailed)
 
 
-# -------------------------
-# TEST 2: Manual Metadata Reverse
-# -------------------------
-def test_manual_metadata_reverse():
+def test_conflict(detailed, timing):
+    t0 = time.time()
+
+    create_files(SRC)
+    os.makedirs(os.path.join(DEST, "original"), exist_ok=True)
+
     try:
-        files = create_files(SRC_DIR)
+        move_app(SRC, DEST)
+        ok = False
+    except MovenlinkError:
+        ok = True
 
-        shutil.copytree(SRC_DIR, MANUAL_DIR)
-        shutil.rmtree(SRC_DIR)
-
-        meta = {"original_path": SRC_DIR}
-
-        with open(os.path.join(MANUAL_DIR, TRACK_FILE), "w") as f:
-            json.dump(meta, f)
-
-        reverse_app(MANUAL_DIR)
-
-        cond1 = os.path.exists(SRC_DIR)
-        cond2 = verify_files(SRC_DIR, files)
-
-        record("Manual Metadata Reverse", cond1 and cond2)
-
-    except Exception as e:
-        print(e)
-        record("Manual Metadata Reverse", False)
+    t1 = time.time()
+    record("Conflict", ok, t1 - t0 if timing else None, detailed)
 
 
 # -------------------------
-# TEST 3: Invalid Reverse
+# Runner
 # -------------------------
-def test_invalid_reverse():
-    try:
-        os.makedirs(MANUAL_DIR, exist_ok=True)
+def run(detailed=False, timing=False):
+    os.environ["MOVENLINK_TEST"] = "1"
 
-        try:
-            reverse_app(MANUAL_DIR)
-            record("Invalid Reverse", False)
-        except SystemExit:
-            record("Invalid Reverse", True)
+    if os.path.exists(BASE):
+        shutil.rmtree(BASE)
+    os.makedirs(BASE)
 
-    except Exception as e:
-        print(e)
-        record("Invalid Reverse", False)
+    test_move_reverse(detailed, timing)
+    test_manual_reverse(detailed, timing)
+    test_invalid_reverse(detailed, timing)
+    test_conflict(detailed, timing)
 
+    print("\nSummary:")
+    passed = sum(1 for r in results if r[1])
+    total = len(results)
 
-# -------------------------
-# TEST 4: Destination Conflict
-# -------------------------
-def test_destination_conflict():
-    try:
-        create_files(SRC_DIR)
-        os.makedirs(os.path.join(DEST_DIR, "original"), exist_ok=True)
+    for name, ok, _ in results:
+        print(f"{name}: {'PASS' if ok else 'FAIL'}")
 
-        try:
-            move_app(SRC_DIR, DEST_DIR)
-            record("Destination Conflict", True)
-        except:
-            record("Destination Conflict", False)
+    print(f"\n{passed}/{total} passed")
 
-    except Exception as e:
-        print(e)
-        record("Destination Conflict", False)
-
-
-# -------------------------
-# TEST 5: Integrity Check
-# -------------------------
-def test_integrity():
-    try:
-        files = create_files(SRC_DIR)
-
-        move_app(SRC_DIR, DEST_DIR)
-
-        moved_path = os.path.join(DEST_DIR, "original")
-
-        cond = verify_files(moved_path, files)
-
-        record("Integrity Check", cond)
-
-    except Exception as e:
-        print(e)
-        record("Integrity Check", False)
-
-
-# -------------------------
-# RUN ALL TESTS
-# -------------------------
-def run_tests():
-    setup()
-
-    test_move_and_reverse()
-    test_manual_metadata_reverse()
-    test_invalid_reverse()
-    test_destination_conflict()
-    test_integrity()
-
-    print("\n--- RESULTS ---")
-    passed = sum(1 for _, r in TEST_RESULTS if r)
-    total = len(TEST_RESULTS)
-
-    for name, result in TEST_RESULTS:
-        print(f"{name}: {'PASS' if result else 'FAIL'}")
-
-    print(f"\nSummary: {passed}/{total} tests passed")
-
-    cleanup()
+    shutil.rmtree(BASE)
 
 
 if __name__ == "__main__":
-    run_tests()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--detailed", action="store_true")
+    parser.add_argument("--include-time", action="store_true")
+
+    args = parser.parse_args()
+
+    run(args.detailed, args.include_time)
