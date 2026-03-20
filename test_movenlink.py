@@ -60,12 +60,13 @@ def test_move_reverse():
     move_app(SRC, DEST)
 
     moved = get_dest_path()
-    ok = verify(moved, data)
+
+    # FIX: check move result before proceeding to reverse
+    if not verify(moved, data):
+        return False
 
     reverse_app(moved)
-    ok = ok and verify(SRC, data)
-
-    return ok
+    return verify(SRC, data)
 
 
 def test_manual_reverse():
@@ -102,6 +103,8 @@ def test_conflict():
 
 
 def test_link_write():
+    # FIX: create files before moving
+    create_files(SRC)
     move_app(SRC, DEST)
 
     link_path = SRC
@@ -147,6 +150,8 @@ def test_link_rename():
 
 
 def test_nested_structure():
+    # FIX: create files before moving
+    create_files(SRC)
     move_app(SRC, DEST)
 
     link_path = SRC
@@ -218,8 +223,12 @@ def run(selected=None, detailed=False, timing=False):
         t = time.time() - t0
         results.append((name, ok, t if timing else None, desc))
 
-        shutil.rmtree(BASE)
-        os.makedirs(BASE)
+        # FIX: use try/finally to ensure cleanup always runs
+        try:
+            shutil.rmtree(BASE)
+            os.makedirs(BASE)
+        except Exception as e:
+            print(f"[DEBUG] Cleanup failed after {name}:", e)
 
     passed = sum(1 for r in results if r[1])
     total = len(results)
@@ -252,7 +261,11 @@ def run(selected=None, detailed=False, timing=False):
 
     print(f"\n{passed}/{total} passed")
 
-    shutil.rmtree(BASE)
+    # FIX: wrap final cleanup in try/finally
+    try:
+        shutil.rmtree(BASE)
+    except Exception as e:
+        print(f"[DEBUG] Final cleanup failed:", e)
 
 
 # -------------------------
