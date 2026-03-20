@@ -4,6 +4,7 @@ import time
 import argparse
 import random
 import string
+import json
 
 from main import move_app, reverse_app, MovenlinkError
 
@@ -45,114 +46,234 @@ def verify(path, data):
     return True
 
 
-def record(name, ok, t=None, detailed=False):
-    results.append((name, ok, t))
-    if detailed:
-        msg = f"{name}: {'PASS' if ok else 'FAIL'}"
-        if t is not None:
-            msg += f" ({t:.4f}s)"
-        print(msg)
+def get_dest_path():
+    return os.path.join(DEST, os.path.basename(SRC))
 
 
 # -------------------------
 # Tests
 # -------------------------
-def test_move_reverse(detailed, timing):
-    t0 = time.time()
 
+def test_move_reverse():
     data = create_files(SRC)
+
     move_app(SRC, DEST)
 
-    moved = os.path.join(DEST, "original")
+    moved = get_dest_path()
     ok = verify(moved, data)
 
     reverse_app(moved)
     ok = ok and verify(SRC, data)
 
-    t1 = time.time()
-    record("Move+Reverse", ok, t1 - t0 if timing else None, detailed)
+    return ok
 
 
-def test_manual_reverse(detailed, timing):
-    t0 = time.time()
-
+def test_manual_reverse():
     data = create_files(SRC)
+
     shutil.copytree(SRC, MANUAL)
     shutil.rmtree(SRC)
 
     with open(os.path.join(MANUAL, ".linkinfo.json"), "w") as f:
-        f.write(f'{{"original_path": "{SRC}"}}')
+        json.dump({"original_path": SRC}, f)
 
     reverse_app(MANUAL)
-    ok = verify(SRC, data)
-
-    t1 = time.time()
-    record("Manual Reverse", ok, t1 - t0 if timing else None, detailed)
+    return verify(SRC, data)
 
 
-def test_invalid_reverse(detailed, timing):
-    t0 = time.time()
-
+def test_invalid_reverse():
     os.makedirs(MANUAL, exist_ok=True)
-
     try:
         reverse_app(MANUAL)
-        ok = False
+        return False
     except MovenlinkError:
-        ok = True
-
-    t1 = time.time()
-    record("Invalid Reverse", ok, t1 - t0 if timing else None, detailed)
+        return True
 
 
-def test_conflict(detailed, timing):
-    t0 = time.time()
-
+def test_conflict():
     create_files(SRC)
-    os.makedirs(os.path.join(DEST, "original"), exist_ok=True)
+    os.makedirs(get_dest_path(), exist_ok=True)
 
     try:
         move_app(SRC, DEST)
-        ok = False
+        return False
     except MovenlinkError:
-        ok = True
+        return True
 
-    t1 = time.time()
-    record("Conflict", ok, t1 - t0 if timing else None, detailed)
+
+def test_link_write():
+    move_app(SRC, DEST)
+
+    link_path = SRC
+    real_path = get_dest_path()
+
+    new_file = os.path.join(link_path, "new_file.txt")
+    content = rand()
+
+    with open(new_file, "w") as f:
+        f.write(content)
+
+    real_file = os.path.join(real_path, "new_file.txt")
+
+    return os.path.exists(real_file) and open(real_file).read() == content
+
+
+def test_link_delete():
+    create_files(SRC)
+    move_app(SRC, DEST)
+
+    link_path = SRC
+    real_path = get_dest_path()
+
+    file_name = "f0.txt"
+    os.remove(os.path.join(link_path, file_name))
+
+    return not os.path.exists(os.path.join(real_path, file_name))
+
+
+def test_link_rename():
+    create_files(SRC)
+    move_app(SRC, DEST)
+
+    link_path = SRC
+    real_path = get_dest_path()
+
+    os.rename(
+        os.path.join(link_path, "f1.txt"),
+        os.path.join(link_path, "renamed.txt")
+    )
+
+    return os.path.exists(os.path.join(real_path, "renamed.txt"))
+
+
+def test_nested_structure():
+    move_app(SRC, DEST)
+
+    link_path = SRC
+    real_path = get_dest_path()
+
+    nested_link = os.path.join(link_path, "subfolder")
+    nested_real = os.path.join(real_path, "subfolder")
+
+    try:
+        os.makedirs(nested_link, exist_ok=True)
+    except Exception:
+        return False
+
+    if not os.path.exists(nested_real):
+        return False
+
+    file_path = os.path.join(nested_link, "deep.txt")
+    content = rand()
+
+    try:
+        with open(file_path, "w") as f:
+            f.write(content)
+    except Exception:
+        return False
+
+    real_file = os.path.join(nested_real, "deep.txt")
+
+    return os.path.exists(real_file) and open(real_file).read() == content
+
+
+# -------------------------
+# Test Registry
+# -------------------------
+TESTS = [
+    ("Move+Reverse", test_move_reverse, "Move a folder and bring it back like nothing changed"),
+    ("Manual Reverse", test_manual_reverse, "Use saved info file to restore folder to original place"),
+    ("Invalid Reverse", test_invalid_reverse, "Try restoring wrong folder and expect it to fail safely"),
+    ("Conflict", test_conflict, "Stop if same folder already exists in destination"),
+    ("Link Write", test_link_write, "Create file in shortcut folder and check it appears in real folder"),
+    ("Link Delete", test_link_delete, "Delete file from shortcut and check it disappears in real folder"),
+    ("Link Rename", test_link_rename, "Rename file in shortcut and check it updates in real folder"),
+    ("Nested Folder", test_nested_structure, "Create folder inside shortcut and verify it works properly"),
+]
 
 
 # -------------------------
 # Runner
 # -------------------------
-def run(detailed=False, timing=False):
+def run(selected=None, detailed=False, timing=False):
     os.environ["MOVENLINK_TEST"] = "1"
 
     if os.path.exists(BASE):
         shutil.rmtree(BASE)
     os.makedirs(BASE)
 
-    test_move_reverse(detailed, timing)
-    test_manual_reverse(detailed, timing)
-    test_invalid_reverse(detailed, timing)
-    test_conflict(detailed, timing)
+    selected_tests = TESTS if selected is None else [TESTS[selected]]
 
-    print("\nSummary:")
+    results.clear()
+
+    for name, func, desc in selected_tests:
+        t0 = time.time()
+
+        try:
+            ok = func()
+        except Exception as e:
+            print(f"[DEBUG] {name} failed:", e)
+            ok = False
+
+        t = time.time() - t0
+        results.append((name, ok, t if timing else None, desc))
+
+        shutil.rmtree(BASE)
+        os.makedirs(BASE)
+
     passed = sum(1 for r in results if r[1])
     total = len(results)
 
-    for name, ok, _ in results:
-        print(f"{name}: {'PASS' if ok else 'FAIL'}")
+    # -------------------------
+    # Output
+    # -------------------------
+    if detailed:
+        print("\n+----------------------+--------+-----------+")
+        print("| Test                 | Result | Time      |")
+        print("+----------------------+--------+-----------+")
+
+        for name, ok, t, _ in results:
+            time_str = f"{t:.4f}s" if timing and t else "-"
+            print(f"| {name:<20} | {'PASS' if ok else 'FAIL':<6} | {time_str:<9} |")
+
+        print("+----------------------+--------+-----------+")
+
+        print("\nDetails:")
+        for name, _, _, desc in results:
+            print(f"{name}: {desc}")
+
+    else:
+        print("\nSummary:")
+        for name, ok, t, _ in results:
+            line = f"{name}: {'PASS' if ok else 'FAIL'}"
+            if timing and t:
+                line += f" ({t:.4f}s)"
+            print(line)
 
     print(f"\n{passed}/{total} passed")
 
     shutil.rmtree(BASE)
 
 
+# -------------------------
+# CLI
+# -------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+
     parser.add_argument("--detailed", action="store_true")
     parser.add_argument("--include-time", action="store_true")
+    parser.add_argument("--test", type=int)
 
     args = parser.parse_args()
 
-    run(args.detailed, args.include_time)
+    if args.test is not None:
+        if args.test < 0 or args.test >= len(TESTS):
+            print("Invalid test index")
+            exit(1)
+
+    run(
+        selected=args.test,
+        detailed=args.detailed,
+        timing=args.include_time
+    )
